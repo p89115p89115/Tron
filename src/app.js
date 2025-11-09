@@ -86,7 +86,8 @@ class App {
 
         this.bridge = new MedusaVerletBridge(this.physics);
 
-        for (let i=0; i<10; i++) {
+        const medusaCount = 0; // disable medusae for S3 bundle
+        for (let i = 0; i < medusaCount; i++) {
             const medusa = new Medusa(this.renderer, this.physics, this.bridge);
             this.scene.add(medusa.object);
             this.physics.addObject(medusa);
