@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build --mode=production",
+    "build:s3": "node scripts/build-s3.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {

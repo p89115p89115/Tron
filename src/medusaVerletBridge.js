@@ -52,6 +52,9 @@ export class MedusaVerletBridge {
             return 0;
         });
         this.fixedNum = this.vertices.findIndex(v => !v.fixed);
+        if (this.fixedNum === -1) {
+            this.fixedNum = this.vertexCount;
+        }
         this.medusaePtr = [];
         let ptr = this.fixedNum;
         for (let i = 0; i < this.medusaCount; i++) {
@@ -122,6 +125,12 @@ export class MedusaVerletBridge {
 
     async _updatePositions(start, count) {
         this.uniforms.vertexStart.value = start;
+        if (count <= 0) {
+            this.uniforms.vertexCount.value = 0;
+            this.updatePositionsKernel.count = 0;
+            this.updatePositionsKernel.updateDispatchCount();
+            return;
+        }
         this.uniforms.vertexCount.value = count;
         this.updatePositionsKernel.count = count;
         this.updatePositionsKernel.updateDispatchCount();
