@@ -39,7 +39,11 @@ export class Godrays {
         const lightDir = uniform(Lights.lightDir);
         const vOffset = varying(float(0), "v_offset");
         const vAzimuth = varying(float(0), "v_azimuth");
-        this.uniforms.matrixInverse = uniformArray(new Array(this.bridge.medusae.length).fill(0).map(() => { return new THREE.Matrix4(); }));
+        const medusaUniformCount = Math.max(1, this.bridge.medusae.length);
+        this.uniforms.matrixInverse = uniformArray(
+            Array.from({ length: medusaUniformCount }, () => new THREE.Matrix4()),
+            'mat4'
+        );
 
         this.material.positionNode = Fn(() => {
             const params = attribute('params');
