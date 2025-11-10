@@ -1,74 +1,61 @@
-import * as THREE from "three/webgpu"
-import App from "./src/app";
-THREE.ColorManagement.enabled = true
+const updateLoadingProgressBar = async (frac, delay = 200) => {
+  return new Promise((resolve) => {
+    const progress = document.getElementById("progress");
+    if (progress) {
+      // 200px is the width of the progress bar defined in index.html
+      progress.style.width = `${frac * 200}px`;
+    }
+    setTimeout(resolve, delay);
+  });
+};
 
-const updateLoadingProgressBar = async (frac, delay=200) => {
-    return new Promise(resolve => {
-        const progress = document.getElementById("progress")
-        // 200px is the width of the progress bar defined in index.html
-        progress.style.width = `${frac * 200}px`
-        setTimeout(resolve, delay)
-    })
-}
-
-const createRenderer = () => {
-    const renderer = new THREE.WebGPURenderer({
-        //forceWebGL: true,
-        //antialias: true,
-    });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    return renderer;
-}
-
-const error = (msg) => {
-    const progressBar = document.getElementById("progress-bar");
+const showError = (message) => {
+  const progressBar = document.getElementById("progress-bar");
+  if (progressBar) {
     progressBar.style.opacity = 0;
-    const error = document.getElementById("error");
+  }
+
+  const error = document.getElementById("error");
+  if (error) {
     error.style.visibility = "visible";
-    error.innerText = "Error: " + msg;
-    const veil = document.getElementById("veil");
     error.style.pointerEvents = "auto";
+    error.innerText = `Error: ${message}`;
+  }
 };
 
+const bootstrap = async () => {
+  let started = false;
 
-const run = async ()=>{
-    if (!navigator.gpu) {
-        error("Your device does not support WebGPU.");
-        return;
+  if ("gpu" in navigator) {
+    try {
+      const { startApp } = await import("./src/main.js");
+      await startApp({ updateLoadingProgressBar });
+      started = true;
+    } catch (error) {
+      console.warn("Failed to start WebGPU experience", error);
     }
+  }
 
-    const renderer = createRenderer();
-
-    if (!renderer.backend.isWebGPUBackend) {
-        error("Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!");
-        return;
+  if (!started) {
+    try {
+      const { startFallbackApp } = await import("./src/fallbackMain.js");
+      await startFallbackApp({ updateLoadingProgressBar });
+      started = true;
+    } catch (error) {
+      console.error("Failed to start WebGL fallback", error);
     }
+  }
 
-    const container = document.getElementById("container");
-    container.appendChild(renderer.domElement);
-
-    const app = new App(renderer);
-    await app.init(updateLoadingProgressBar);
-    window.addEventListener("resize", ()=>{
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        app.resize(window.innerWidth, window.innerHeight);
-    });
-    const veil = document.getElementById("veil");
-    veil.style.opacity = 0;
-    const progressBar = document.getElementById("progress-bar");
-    progressBar.style.opacity = 0;
-    const clock = new THREE.Clock();
-    const animate = async ()=>{
-        const delta = clock.getDelta();
-        const elapsed = clock.getElapsedTime();
-        await app.update(delta, elapsed);
-        requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
+  if (!started) {
+    showError(
+      "Couldn't initialize the experience in this browser. Try updating or using a different device."
+    );
+  }
 };
 
-run().catch(error => {
-    console.error(error);
+bootstrap().catch((error) => {
+  console.error(error);
+  showError(
+    "Couldn't initialize the experience in this browser. Try updating or using a different device."
+  );
 });
