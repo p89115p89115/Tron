@@ -82,12 +82,13 @@ export class MedusaVerletBridge {
         this.paramsData = instancedArray(paramsArray, 'vec3');
         this.offsetData = instancedArray(offsetArray, 'vec4');
 
+        const medusaUniformCount = Math.max(1, this.medusaCount);
         this.medusaTransformData = uniformArray(
-            new Array(this.medusaCount).fill(0).map(() => new THREE.Matrix4()),
+            Array.from({ length: medusaUniformCount }, () => new THREE.Matrix4()),
             'mat4'
         );
         this.medusaPhaseData = uniformArray(
-            new Array(this.medusaCount).fill(0),
+            Array(medusaUniformCount).fill(0),
             'float'
         );
         this.uniforms.vertexStart = uniform(0, "uint");
