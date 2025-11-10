@@ -39,18 +39,36 @@ const run = async ()=>{
         return;
     }
 
-    const renderer = createRenderer();
+    let adapter;
+    try {
+        adapter = await navigator.gpu.requestAdapter();
+    } catch (err) {
+        console.warn("navigator.gpu.requestAdapter() failed", err);
+    }
 
-    if (!renderer.backend.isWebGPUBackend) {
+    if (!adapter) {
         error("Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!");
         return;
     }
+
+    const renderer = createRenderer();
 
     const container = document.getElementById("container");
     container.appendChild(renderer.domElement);
 
     const app = new App(renderer);
-    await app.init(updateLoadingProgressBar);
+    try {
+        await app.init(updateLoadingProgressBar);
+    } catch (err) {
+        console.error(err);
+        error("Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!");
+        return;
+    }
+
+    if (!renderer.backend?.isWebGPUBackend) {
+        error("Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!");
+        return;
+    }
     window.addEventListener("resize", ()=>{
         renderer.setSize(window.innerWidth, window.innerHeight);
         app.resize(window.innerWidth, window.innerHeight);
