@@ -23,48 +23,39 @@ const showError = (message) => {
   }
 };
 
-const ensureWebGPUAdapter = async () => {
-  if (!("gpu" in navigator)) {
-    showError("Your device does not support WebGPU.");
-    return null;
-  }
-
-  let adapter;
-
-  try {
-    adapter = await navigator.gpu.requestAdapter();
-  } catch (err) {
-    console.warn("navigator.gpu.requestAdapter() failed", err);
-  }
-
-  if (!adapter) {
-    showError(
-      "Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!"
-    );
-    return null;
-  }
-
-  return adapter;
-};
-
 const bootstrap = async () => {
-  const adapter = await ensureWebGPUAdapter();
-  if (!adapter) {
-    return;
+  let started = false;
+
+  if ("gpu" in navigator) {
+    try {
+      const { startApp } = await import("./src/main.js");
+      await startApp({ updateLoadingProgressBar });
+      started = true;
+    } catch (error) {
+      console.warn("Failed to start WebGPU experience", error);
+    }
   }
 
-  try {
-    const { startApp } = await import("./src/main.js");
-    await startApp({ updateLoadingProgressBar });
-  } catch (error) {
-    console.error("Failed to start WebGPU experience", error);
+  if (!started) {
+    try {
+      const { startFallbackApp } = await import("./src/fallbackMain.js");
+      await startFallbackApp({ updateLoadingProgressBar });
+      started = true;
+    } catch (error) {
+      console.error("Failed to start WebGL fallback", error);
+    }
+  }
+
+  if (!started) {
     showError(
-      "Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!"
+      "Couldn't initialize the experience in this browser. Try updating or using a different device."
     );
   }
 };
 
 bootstrap().catch((error) => {
   console.error(error);
-  showError("Couldn't initialize WebGPU. Make sure WebGPU is supported by your Browser!");
+  showError(
+    "Couldn't initialize the experience in this browser. Try updating or using a different device."
+  );
 });
