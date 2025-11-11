@@ -778,87 +778,145 @@
 
 
 <script>
-// ==== Sync right-drag to Aurelia background (camera rotation like original) ====
 (function(){
-  let overlay = document.getElementById('canvas');
-  let bgCanvas = null;
-  function findBgCanvas(){
-    const canvases = Array.from(document.querySelectorAll('canvas'));
-    // pick the first canvas that is not our overlay (id="canvas")
-    for(const c of canvases){
-      if (c !== overlay) return c;
-    }
-    return null;
-  }
-  function ensureBg(){
-    if (!bgCanvas || !document.body.contains(bgCanvas)) {
-      bgCanvas = findBgCanvas();
-    }
+  const KEYBOARD_YAW_SPEED = 0.02;
+  const KEYBOARD_PITCH_SPEED = 0.02;
+  const MOUSE_YAW_SPEED = 0.004;
+  const MOUSE_PITCH_SPEED = 0.004;
+
+  const overlay = document.getElementById('canvas');
+  if (!overlay) return;
+
+  const active = { w: false, a: false, s: false, d: false };
+  const lookup = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd' };
+
+  let leftButtonDown = false;
+  let rightButtonDown = false;
+  let lastX = 0;
+  let lastY = 0;
+
+  function isTypingTarget(target){
+    if (!target || !(target instanceof Element)) return false;
+    const tag = target.tagName;
+    if (!tag) return false;
+    return /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || target.isContentEditable;
   }
 
-  // synthesize pointer events on bg canvas
-  function synth(type, clientX, clientY, button){
-    if (!bgCanvas) return;
-    const rect = bgCanvas.getBoundingClientRect();
-    const x = Math.max(rect.left, Math.min(clientX, rect.right-1));
-    const y = Math.max(rect.top,  Math.min(clientY, rect.bottom-1));
-    const evt = new PointerEvent(type, {
+  overlay.addEventListener('mousedown', (event) => {
+    if (event.button === 0) {
+      leftButtonDown = true;
+    } else if (event.button === 2) {
+      rightButtonDown = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      event.preventDefault();
+    }
+  }, true);
+
+  window.addEventListener('mouseup', (event) => {
+    if (event.button === 0) {
+      leftButtonDown = false;
+    } else if (event.button === 2) {
+      rightButtonDown = false;
+    }
+  }, true);
+
+  window.addEventListener('blur', () => {
+    leftButtonDown = false;
+    rightButtonDown = false;
+    active.w = active.a = active.s = active.d = false;
+  });
+
+  window.addEventListener('keydown', (event) => {
+    if (event.repeat) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (isTypingTarget(event.target)) return;
+    const key = lookup[event.code];
+    if (key) active[key] = true;
+  }, true);
+
+  window.addEventListener('keyup', (event) => {
+    const key = lookup[event.code];
+    if (key) active[key] = false;
+  }, true);
+
+  function applyRotation(deltaYaw, deltaPitch){
+    let applied = false;
+    const controls = window.AureliaControls;
+    if (controls && typeof controls.rotateLeft === 'function' && typeof controls.rotateUp === 'function') {
+      if (deltaYaw) controls.rotateLeft(deltaYaw);
+      if (deltaPitch) controls.rotateUp(deltaPitch);
+      if (deltaYaw || deltaPitch) {
+        if (typeof controls.update === 'function') controls.update();
+        applied = true;
+      }
+    } else {
+      const camera = window.AureliaCamera;
+      if (camera && camera.rotation) {
+        if (deltaYaw) {
+          camera.rotation.y += deltaYaw;
+          applied = true;
+        }
+        if (deltaPitch) {
+          const nextPitch = Math.max(-1.55, Math.min(1.55, camera.rotation.x - deltaPitch));
+          if (nextPitch !== camera.rotation.x) {
+            camera.rotation.x = nextPitch;
+            applied = true;
+          }
+        }
+      }
+    }
+    return applied;
+  }
+
+  window.addEventListener('mousemove', (event) => {
+    if (!rightButtonDown) return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    if (!dx && !dy) return;
+    if (applyRotation(dx * MOUSE_YAW_SPEED, dy * MOUSE_PITCH_SPEED)) {
+      event.preventDefault();
+    }
+  }, true);
+
+  overlay.addEventListener('wheel', (event) => {
+    const controls = window.AureliaControls;
+    const target = controls?.domElement || window.AureliaCanvas || null;
+    if (!controls || !target) return;
+    const forwarded = new WheelEvent('wheel', {
       bubbles: true,
       cancelable: true,
-      pointerId: 1,
-      pointerType: 'mouse',
-      isPrimary: true,
-      clientX: x,
-      clientY: y,
-      button: (typeof button==='number'? button : 2), // right button
-      buttons: (type==='pointerup'? 0 : 2)
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      deltaZ: event.deltaZ,
+      deltaMode: event.deltaMode,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+      metaKey: event.metaKey
     });
-    bgCanvas.dispatchEvent(evt);
+    target.dispatchEvent(forwarded);
+    if (forwarded.defaultPrevented) {
+      event.preventDefault();
+    }
+  }, { passive: false });
+
+  function step(){
+    let yaw = 0;
+    let pitch = 0;
+    if (active.a && !active.d) yaw += KEYBOARD_YAW_SPEED;
+    if (active.d && !active.a) yaw -= KEYBOARD_YAW_SPEED;
+    if (active.w && !active.s) pitch += KEYBOARD_PITCH_SPEED;
+    if (active.s && !active.w) pitch -= KEYBOARD_PITCH_SPEED;
+    if (!leftButtonDown && (yaw || pitch)) applyRotation(yaw, pitch);
+    requestAnimationFrame(step);
   }
 
-  let forwarding = false;
-  let lastX = 0, lastY = 0;
-
-  function onDown(e){
-    if (e.button !== 2) return;
-    ensureBg();
-    if (!bgCanvas) return;
-    forwarding = true;
-    lastX = e.clientX; lastY = e.clientY;
-    synth('pointerdown', e.clientX, e.clientY, 2);
-  }
-  function onMove(e){
-    if (!forwarding) return;
-    ensureBg();
-    if (!bgCanvas) return;
-    // forward movement while right button held
-    synth('pointermove', e.clientX, e.clientY, 2);
-  }
-  function onUp(e){
-    if (e.button !== 2) return;
-    if (!forwarding) return;
-    ensureBg();
-    if (!bgCanvas) { forwarding=false; return; }
-    synth('pointerup', e.clientX, e.clientY, 2);
-    forwarding = false;
-  }
-  function onLeave(e){
-    if (!forwarding) return;
-    ensureBg();
-    if (!bgCanvas) { forwarding=false; return; }
-    synth('pointerup', lastX, lastY, 2);
-    forwarding = false;
-  }
-
-  overlay.addEventListener('mousedown', onDown, true);
-  window.addEventListener('mousemove', onMove, true);
-  window.addEventListener('mouseup', onUp, true);
-  overlay.addEventListener('mouseleave', onLeave, true);
-
-  // also react if Aurelia canvas appears late
-  const mo = new MutationObserver(()=>ensureBg());
-  mo.observe(document.documentElement, {childList:true, subtree:true});
-  ensureBg();
+  requestAnimationFrame(step);
 })();
 </script>
 
