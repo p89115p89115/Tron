@@ -21,7 +21,7 @@
     .num{width:110px;padding:4px 6px;background:#0b1220;border:1px solid #334;color:#dfe;border-radius:4px}
     #fatal { position:fixed; left:12px; right:12px; bottom:12px; background:#1d0000; color:#ffdede; border:1px solid #550000; padding:10px 12px; border-radius:6px; z-index: 2147483647; display:none; white-space:pre-wrap; }
   </style>
-  <script type="module" crossorigin src="./assets/index-BQkjeiUn.js"></script>
+  <script type="module" src="/index.js"></script>
   <script>
     window.addEventListener('error', (e) => {
       try {
@@ -328,6 +328,26 @@
           if((painting || settings.demoMode) && !window.__IMPORTING){
             riseOffsetY += settings.riseSpeed*DPR; cam.y -= settings.riseSpeed*settings.followRatio*DPR;
           }
+        }
+
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+          const detail = (cam.mode === 'fly')
+            ? {
+                mode: 'fly',
+                yaw: cam.yaw,
+                pitch: cam.pitch,
+                position: { x: cam.pos.x, y: cam.pos.y, z: cam.pos.z }
+              }
+            : {
+                mode: 'orbit',
+                theta: cam.theta,
+                phi: cam.phi,
+                radius: cam.radius,
+                targetY: cam.y
+              };
+          try {
+            window.dispatchEvent(new CustomEvent('sketcher-camera', { detail }));
+          } catch (_) {}
         }
 
         ctx.setTransform(1,0,0,1,0,0);
