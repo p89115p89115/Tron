@@ -832,7 +832,10 @@
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (isTypingTarget(event.target)) return;
     const key = lookup[event.code];
-    if (key) active[key] = true;
+    if (key) {
+      active[key] = true;
+      event.preventDefault();
+    }
   }, true);
 
   window.addEventListener('keyup', (event) => {
@@ -913,78 +916,6 @@
     if (active.w && !active.s) pitch += KEYBOARD_PITCH_SPEED;
     if (active.s && !active.w) pitch -= KEYBOARD_PITCH_SPEED;
     if (!leftButtonDown && (yaw || pitch)) applyRotation(yaw, pitch);
-    requestAnimationFrame(step);
-  }
-
-  requestAnimationFrame(step);
-})();
-</script>
-
-<script>
-(function(){
-  const KEYBOARD_YAW_SPEED = 0.02;
-  const KEYBOARD_PITCH_SPEED = 0.02;
-
-  const active = { w: false, a: false, s: false, d: false };
-  const lookup = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd' };
-
-  function isTypingTarget(target){
-    if (!target || !(target instanceof Element)) return false;
-    const tag = target.tagName;
-    if (!tag) return false;
-    return /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || target.isContentEditable;
-  }
-
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) return;
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (isTypingTarget(event.target)) return;
-    const key = lookup[event.code];
-    if (key) active[key] = true;
-  }, true);
-
-  window.addEventListener('keyup', (event) => {
-    const key = lookup[event.code];
-    if (key) active[key] = false;
-  }, true);
-
-  function applyRotation(deltaYaw, deltaPitch){
-    let applied = false;
-    const controls = window.AureliaControls;
-    if (controls && typeof controls.rotateLeft === 'function' && typeof controls.rotateUp === 'function') {
-      if (deltaYaw) controls.rotateLeft(deltaYaw);
-      if (deltaPitch) controls.rotateUp(deltaPitch);
-      if (deltaYaw || deltaPitch) {
-        if (typeof controls.update === 'function') controls.update();
-        applied = true;
-      }
-    } else {
-      const camera = window.AureliaCamera;
-      if (camera && camera.rotation) {
-        if (deltaYaw) {
-          camera.rotation.y += deltaYaw;
-          applied = true;
-        }
-        if (deltaPitch) {
-          const nextPitch = Math.max(-1.55, Math.min(1.55, camera.rotation.x + deltaPitch));
-          if (nextPitch !== camera.rotation.x) {
-            camera.rotation.x = nextPitch;
-            applied = true;
-          }
-        }
-      }
-    }
-    return applied;
-  }
-
-  function step(){
-    let yaw = 0;
-    let pitch = 0;
-    if (active.a && !active.d) yaw += KEYBOARD_YAW_SPEED;
-    if (active.d && !active.a) yaw -= KEYBOARD_YAW_SPEED;
-    if (active.w && !active.s) pitch += KEYBOARD_PITCH_SPEED;
-    if (active.s && !active.w) pitch -= KEYBOARD_PITCH_SPEED;
-    if (yaw || pitch) applyRotation(yaw, pitch);
     requestAnimationFrame(step);
   }
 
