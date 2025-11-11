@@ -36,9 +36,12 @@ class App {
 
     frameNum = 0;
 
+    sketcherCameraState = null;
+
     constructor(renderer){
         console.time("firstFrame");
         this.renderer = renderer;
+        this.handleSketcherCamera = this.handleSketcherCamera.bind(this);
     }
 
     async init(progressCallback) {
@@ -63,6 +66,8 @@ class App {
         this.controls.minDistance = 8;
         this.controls.maxDistance = 25;
         this.controls.enablePan = false;
+
+        window.addEventListener("sketcher-camera", this.handleSketcherCamera);
 
         await progressCallback(0.1);
 
@@ -198,6 +203,8 @@ class App {
         const { runSimulation, showVerletSprings } = conf;
         this.springVisualizer.object.visible = showVerletSprings;
 
+        this.applySketcherCameraState();
+
         conf.update();
         this.controls.update(delta);
         Medusa.updateStatic();
@@ -221,6 +228,86 @@ class App {
         }
         this.frameNum++
         conf.end();
+    }
+
+    handleSketcherCamera(event) {
+        const detail = event?.detail;
+        if (!detail || !detail.mode) {
+            return;
+        }
+        this.sketcherCameraState = detail;
+    }
+
+    applySketcherCameraState() {
+        const state = this.sketcherCameraState;
+        if (!state) {
+            return;
+        }
+
+        if (state.mode === "orbit") {
+            this.applySketcherOrbitState(state);
+        } else if (state.mode === "fly") {
+            this.applySketcherFlyState(state);
+        }
+    }
+
+    applySketcherOrbitState(state) {
+        this.controls.enabled = true;
+
+        const yaw = state.theta ?? 0;
+        const pitch = state.phi ?? 0;
+        const radius = state.radius ?? 9000;
+        const targetYRaw = state.targetY ?? -4000;
+
+        const targetY = THREE.MathUtils.clamp((targetYRaw + 4000) / 2000, -5, 5);
+        const distance = THREE.MathUtils.clamp(
+            15 + (radius - 9000) / 500,
+            this.controls.minDistance,
+            this.controls.maxDistance
+        );
+
+        const forward = new THREE.Vector3(
+            Math.sin(yaw) * Math.cos(pitch),
+            -Math.sin(pitch),
+            Math.cos(yaw) * Math.cos(pitch)
+        ).normalize();
+
+        const target = new THREE.Vector3(0, targetY, 0);
+        const desiredPosition = target.clone().sub(forward.clone().multiplyScalar(distance));
+
+        this.camera.position.copy(desiredPosition);
+        this.camera.quaternion.setFromEuler(new THREE.Euler(-pitch, yaw, 0, "YXZ"));
+        this.controls.target.copy(target);
+    }
+
+    applySketcherFlyState(state) {
+        this.controls.enabled = false;
+
+        const yaw = state.yaw ?? 0;
+        const pitch = state.pitch ?? 0;
+        const positionState = state.position ?? { x: 0, y: 0, z: 0 };
+
+        const forward = new THREE.Vector3(
+            Math.sin(yaw) * Math.cos(pitch),
+            -Math.sin(pitch),
+            Math.cos(yaw) * Math.cos(pitch)
+        ).normalize();
+
+        const scale = 1 / 1000;
+        const baseDistance = 12;
+
+        const offset = new THREE.Vector3(
+            positionState.x * scale,
+            positionState.y * scale,
+            positionState.z * scale
+        );
+
+        const desiredPosition = new THREE.Vector3(0, 0, baseDistance).add(offset);
+        const lookTarget = desiredPosition.clone().add(forward.clone().multiplyScalar(5));
+
+        this.camera.position.copy(desiredPosition);
+        this.camera.quaternion.setFromEuler(new THREE.Euler(-pitch, yaw, 0, "YXZ"));
+        this.controls.target.copy(lookTarget);
     }
 }
 export default App;
