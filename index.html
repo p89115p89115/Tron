@@ -1,72 +1,846 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, height=device-height, interactive-widget=resizes-content, shrink-to-fit=0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
-  <meta property="og:title" content="Aurelia - ThreeJS WebGPU Experiment - holtsetio.com" />
-  <meta property="og:image" content="https://holtsetio.com/img/lab/aurelia.jpg" />
-  <title>Aurelia - ThreeJS WebGPU Experiment - holtsetio.com</title>
+  <title>Aurelia Background + 3D Sketcher (Fix6, no bottom-left info)</title>
   <style>
-    html,
-    body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      position: relative;
-      overflow: hidden;
-    }
-    #container {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    #veil {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: black;
-      opacity: 1;
-      pointer-events: none;
-      transition: opacity 1s ease-in-out;
-    }
-    #progress-bar {
-      position: absolute;
-      width: 200px;
-      height: 5px;
-      left: 50vw;
-      top: 50vh;
-      transition: opacity 0.2s ease;
-      transform: translateX(-50%) translateY(-50%);
-      background-color: #333;
-    }
-    #progress {
-      position: absolute;
-      width: 0px;
-      height: 5px;
-      left: 0px;
-      top: 0px;
-      transition: width 0.2s ease;
-      background-color: #848484;
-    }
-    #error {
-      position: absolute;
-      left: 50vw;
-      top: 50vh;
-      transform: translateX(-50%) translateY(-50%);
-      color: #FFFFFF;
-      visibility: hidden;
-    }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; background:#000; color:#e6f7ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"Noto Sans"; }
+    #container { position:absolute; inset:0; z-index:0; }
+    #veil { position:absolute; inset:0; background:#000; opacity:1; pointer-events:none; transition:opacity .8s; z-index:1; }
+    #progress-bar { position:absolute; width:200px; height:5px; left:50vw; top:50vh; transform:translate(-50%,-50%); background:#333; }
+    #progress { width:0; height:5px; background:#848484; transition:width .2s; }
+    #error { position:absolute; left:50vw; top:50vh; transform:translate(-50%,-50%); color:#fff; visibility:hidden; white-space:pre-wrap; max-width:80vw; }
+    #sketcher-layer { position:fixed; inset:0; z-index:20; pointer-events:none; }
+    #canvas { position:absolute; inset:0; display:block; z-index:22; pointer-events:auto; outline:none; }
+    .dg.ac { z-index:2147483647 !important; position:fixed !important; right:0 !important; top:0 !important; pointer-events:auto !important; }
+    .topbar{position:fixed;left:12px;top:12px;z-index:99999;display:flex;gap:8px;align-items:center;flex-wrap:wrap; pointer-events:auto; background:rgba(0,0,0,.35); padding:6px 8px; border-radius:8px; border:1px solid rgba(255,255,255,.08);}
+    .btn{padding:6px 10px;border:1px solid #557;background:#0b1324;color:#e7fbff;border-radius:6px;cursor:pointer}
+    .btn:active{transform:translateY(1px)}
+    .lbl{display:flex;align-items:center;gap:6px;color:#eee;font:12px/1.2 sans-serif}
+    .num{width:110px;padding:4px 6px;background:#0b1220;border:1px solid #334;color:#dfe;border-radius:4px}
+    #fatal { position:fixed; left:12px; right:12px; bottom:12px; background:#1d0000; color:#ffdede; border:1px solid #550000; padding:10px 12px; border-radius:6px; z-index: 2147483647; display:none; white-space:pre-wrap; }
   </style>
+  <script type="module" crossorigin src="./assets/index-BQkjeiUn.js"></script>
+  <script>
+    window.addEventListener('error', (e) => {
+      try {
+        const box = document.getElementById('fatal');
+        if (!box) return;
+        box.style.display = 'block';
+        box.textContent = '[Runtime Error] ' + (e.message || e.error?.message || e.error || '') + '\\n' + (e.filename ? (e.filename + ':' + e.lineno + ':' + e.colno) : '');
+      } catch (_) {}
+    });
+  </script>
+
+<style>
+#info, .info, .overlay, .credits {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+</style>
 </head>
 <body>
-<div id="container">
-  <div id="veil">
-    <div id="progress-bar"><div id="progress"></div></div>
-    <div id="error"></div>
+  <div id="container">
+    <div id="veil">
+      <div id="progress-bar"><div id="progress"></div></div>
+      <div id="error"></div>
+    </div>
   </div>
-  <script src="./index.js" type="module"></script>
+
+  <div id="sketcher-layer">
+    <canvas id="canvas" tabindex="0"></canvas>
+  </div>
+
+  <div id="fatal"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      const DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d', { alpha: true });
+      canvas.focus();
+      ctx.imageSmoothingEnabled = true;
+
+      function hslToRgb(h,s,l){ s/=100;l/=100;const k=n=>(n+h/30)%12;const a=s*Math.min(l,1-l);
+        const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+        return {r:Math.round(255*f(0)),g:Math.round(255*f(8)),b:Math.round(255*f(4))}; }
+      function randomNeonColor(){ const hues=[190,200,210,220,160,280,300,330,20,45];
+        const h=hues[(Math.random()*hues.length)|0]+(Math.random()*10-5);
+        return hslToRgb((h+360)%360, 96, 62); }
+
+      const settings = {
+        lineWidth: 1,
+        trailAlpha: 0.16,
+        breathingMode: false,
+        demoMode: false,
+        demoFullScreen: false,
+        demoPointsPerFrame: 9,
+        demoStepAmplitude: 900,
+        demoNewLineChance: 0.96,
+        demoPad: 24,
+        showFloor: true,
+        showRightWall: true,
+        orbitStep: 0.002,
+        moveYSpeed: 40,
+        moveXSpeed: 60,
+        zoomStep: 40,
+        drawPlaneZ: 1200,
+        glowAlpha: 0.45,
+        glowStrength: 8,
+        enableGlow: false,
+        riseSpeed: 2,
+        followRatio: 0.35,
+        minSegmentLen: 0.2,
+        gridStep: 240,
+        gridCell: 600,
+        gridHalf: 10000,
+        gridYRange: 90000,
+
+        breath_timeScale: 0.002,
+        breath_axis: 'x',
+        breath_wave1Amp: 60,
+        breath_wave2Amp: 40,
+        breath_wave2UFreq: 8,
+        breath_wave2TFreq: 2,
+        breath_wave3Amp: 100,
+        breath_wave3PhaseMul: 4,
+        breath_baseline: 60,
+        breath_envelopePow: 1,
+
+        clearScreen(){
+          lines.length = 0;
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+        }
+      };
+      const lines = [];
+      const cam = {
+        theta:-1.6, phi:-0.2, radius:9000, velTheta:0, velPhi:0, damping:0.92, minPhi:-2, maxPhi:2, y:-4000,
+        mode:'orbit',
+        pos:{x:0,y:-4000,z:0}, yaw:-1.6, pitch:-0.2
+      };
+
+      const fly = {
+        speed: 30, sprint: 2.0, lookSensitivity: 0.0025, damping: 0.92,
+        thrust: 0, thrustMax: 5000, thrustGain: 80, thrustBrake: 110, thrustDrag: 0.985,
+        vel:{x:0,y:0,z:0}
+      };
+
+      let focal=0, vpx=0, vpy=0, riseOffsetY=0;
+      function resize(){
+        const w = Math.floor(window.innerWidth), h = Math.floor(window.innerHeight);
+        canvas.style.width=w+'px'; canvas.style.height=h+'px'; canvas.width=w*DPR; canvas.height=h*DPR;
+        focal=Math.max(canvas.width, canvas.height)/2; vpx=canvas.width/2; vpy=canvas.height/2;
+        ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height);
+      }
+      window.addEventListener('resize', resize); resize();
+
+      function rotateY(v,a){ const c=Math.cos(a), s=Math.sin(a); return {x:v.x*c-v.z*s,y:v.y,z:v.z*c+v.x*s}; }
+      function rotateX(v,a){ const c=Math.cos(a), s=Math.sin(a); return {x:v.x,y:v.y*c-v.z*s,z:v.z*c+v.y*s}; }
+
+      function projectTo2DWithYOffset(p,yoff){
+        let v;
+        if (cam.mode === 'fly') {
+          v = { x: p.x - cam.pos.x, y: p.y + (yoff||0) - cam.pos.y, z: p.z - cam.pos.z };
+          v = rotateY(v, -cam.yaw);
+          v = rotateX(v, -cam.pitch);
+          v.z += cam.radius;
+        } else {
+          v = { x:p.x, y:p.y+(yoff||0)-cam.y, z:p.z };
+          v = rotateY(v, -cam.theta);
+          v = rotateX(v, -cam.phi);
+          v.z += cam.radius;
+        }
+        const scale=focal/(focal+v.z); if(scale<=0) return null;
+        return {x:vpx+v.x*scale, y:vpy+v.y*scale};
+      }
+
+      function screenToWorldOnPlane(sx,sy,drawPlaneZ){
+        const scaleInv=(focal+drawPlaneZ)/focal;
+        const x_cam=(sx-vpx)*scaleInv; const y_cam=(sy-vpy)*scaleInv; const z_cam=drawPlaneZ;
+        let v = {x:x_cam, y:y_cam, z:z_cam};
+        if (cam.mode === 'fly') {
+          v = rotateX(v, +cam.pitch);
+          v = rotateY(v, +cam.yaw);
+          return { x: v.x + cam.pos.x, y: v.y + cam.pos.y, z: v.z + cam.pos.z };
+        } else {
+          v = rotateX(v, +cam.phi);
+          v = rotateY(v, +cam.theta);
+          return { x: v.x, y: v.y+cam.y, z: v.z };
+        }
+      }
+
+      // Input
+      const keys={w:false,s:false,a:false,d:false,q:false,e:false,shift:false,t:false};
+      const KEYMAP={87:'w',83:'s',65:'a',68:'d',81:'q',69:'e',84:'t',16:'shift'};
+      window.addEventListener('keydown', e=>{ const k=KEYMAP[e.keyCode]; if(k&&keys[k]!==undefined){ keys[k]=true; e.preventDefault(); }
+        if(e.keyCode===84){ settings.demoMode = !settings.demoMode; if(settings.demoMode) line=null; }
+      });
+      window.addEventListener('keyup', e=>{ const k=KEYMAP[e.keyCode]; if(k&&keys[k]!==undefined){ keys[k]=false; e.preventDefault(); }});
+
+      const mouse={down:false, look:false, lastX:0, lastY:0};
+      canvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+      let painting=false, points=[], line=null;
+      canvas.addEventListener('mousedown', e=>{
+        if (cam.mode==='fly') {
+          if(e.button===2){ mouse.look=true; mouse.lastX=e.clientX; mouse.lastY=e.clientY; }
+          return;
+        }
+        if(e.button!==0) return; settings.demoMode=false; mouse.down=true; painting=true;
+        const rect=canvas.getBoundingClientRect(); const startX=(e.clientX-rect.left)*DPR; const startY=(e.clientY-rect.top)*DPR;
+        points=[]; line={points:[], color:randomNeonColor(), lineWidth:settings.lineWidth, _phase: Math.random()*Math.PI*2, anchorRiseY: riseOffsetY};
+        lines.push(line);
+        addPointWorldFromScreen(startX, startY);
+      });
+      window.addEventListener('mouseup', e=>{ if(e.button===2){ mouse.look=false; return; } mouse.down=false; painting=false; line=null; });
+      canvas.addEventListener('mousemove', e=>{
+        if(mouse.look && cam.mode==='fly'){
+          const dx = e.clientX - mouse.lastX; const dy = e.clientY - mouse.lastY;
+          mouse.lastX = e.clientX; mouse.lastY = e.clientY;
+          cam.yaw   += dx * fly.lookSensitivity;
+          cam.pitch -= dy * fly.lookSensitivity;
+          cam.pitch = Math.max(-2, Math.min(2, cam.pitch));
+          return;
+        }
+        if(!mouse.down||!line||cam.mode==='fly') return; const rect=canvas.getBoundingClientRect();
+        const x=(e.clientX-rect.left)*DPR; const y=(e.clientY-rect.top)*DPR; addPointWorldFromScreen(x,y);
+      });
+
+      function addPointWorldFromScreen(sx,sy){
+        const L=line.points.length; const world=screenToWorldOnPlane(sx,sy,settings.drawPlaneZ*DPR);
+        if(L>0){ const last=line.points[L-1]; const dx=world.x-last.x, dy=world.y-last.y, dz=world.z-last.z;
+          if(dx*dx+dy*dy+dz*dz < (settings.minSegmentLen*settings.minSegmentLen)) return; } line.points.push(world); }
+
+      // Grid
+      function strokeGridLine(p1,p2,major){ ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y);
+        ctx.lineWidth=(major?1.6:1.0)*DPR; ctx.strokeStyle=major?'rgba(130,210,255,0.45)':'rgba(70,160,220,0.20)'; ctx.stroke(); ctx.restore(); }
+      function drawFloorAndRightWall(){ const cell=settings.gridCell*DPR, half=settings.gridHalf*DPR;
+        if(settings.showFloor){ for(let x=-half;x<=half;x+=cell){ const pA=projectTo2DWithYOffset({x,y:-10,z:-half},0), pB=projectTo2DWithYOffset({x,y:-10,z:half},0); if(pA&&pB) strokeGridLine(pA,pB,false); }
+          for(let z=-half;z<=half;z+=cell){ const pA=projectTo2DWithYOffset({x:-half,y:-10,z},0), pB=projectTo2DWithYOffset({x:half,y:-10,z},0); if(pA&&pB) strokeGridLine(pA,pB,false);} }
+        if(settings.showRightWall){ const wallX=half; for(let z=-half;z<=half;z+=cell){ const pA=projectTo2DWithYOffset({x:wallX,y:-30000,z},0);
+            const pB=projectTo2DWithYOffset({x:wallX,y:30000,z},0); if(pA&&pB) strokeGridLine(pA,pB,false); } } }
+
+      // Rendering helpers
+      function strokePath2D(ctx,pts){ ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y); for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y); }
+
+      function renderLine(L, translateY){
+        const pts2=[];
+        for(let i=0;i<L.points.length;i++){ const p2=projectTo2DWithYOffset(L.points[i], translateY); if(p2) pts2.push(p2); }
+        if(pts2.length<2) return;
+        if (settings.breathingMode) {
+          const t = performance.now() * (settings.breath_timeScale || 0.002);
+          const phase = (L._phase ||= Math.random() * Math.PI * 2);
+          for(let i=0;i<pts2.length;i++){
+            const p = pts2[i];
+            const u = (pts2.length>1)? (i/(pts2.length-1)) : 0;
+            const envelopeBase = Math.sin(u * Math.PI);
+            const envelope = Math.pow(Math.max(0, envelopeBase), Math.max(0.1, settings.breath_envelopePow || 1));
+            const wave1 = Math.sin(t + phase) * (settings.breath_wave1Amp || 0);
+            const wave2 = Math.sin(u * (settings.breath_wave2UFreq || 8) + t * (settings.breath_wave2TFreq || 2)) * (settings.breath_wave2Amp || 0);
+            const wave3 = Math.cos(phase * (settings.breath_wave3PhaseMul || 4) - t)
+                          * Math.pow(Math.cos(u * Math.PI - Math.PI / 2), 2)
+                          * (settings.breath_wave3Amp || 0);
+            const base = (settings.breath_baseline || 0);
+            const dx = envelope * (wave1 + wave2 + wave3 + base);
+            if ((settings.breath_axis || 'x') === 'y') p.y += dx; else p.x += dx;
+          }
+        }
+        const lw = (L.lineWidth!=null? L.lineWidth : settings.lineWidth) * DPR;
+        if (settings.enableGlow) {
+          ctx.save();
+          ctx.setTransform(1,0,0,1,0,0);
+          ctx.lineCap='round'; ctx.lineJoin='round';
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.shadowBlur = (settings.glowStrength||8) * DPR;
+          const c = L.color || {r:158,g:239,b:255};
+          ctx.shadowColor = `rgb(${c.r|0},${c.g|0},${c.b|0})`;
+          ctx.lineWidth = lw * 1.8;
+          ctx.strokeStyle = `rgba(${c.r|0},${c.g|0},${c.b|0},${settings.glowAlpha||0.45})`;
+          strokePath2D(ctx, pts2); ctx.stroke();
+          ctx.restore();
+        }
+        ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.lineCap='round'; ctx.lineJoin='round';
+        ctx.lineWidth=lw;
+        const c = L.color || {r:158,g:239,b:255};
+        ctx.strokeStyle=`rgb(${c.r|0},${c.g|0},${c.b|0})`;
+        strokePath2D(ctx, pts2); ctx.stroke(); ctx.restore();
+      }
+
+      function startDemoLine() {
+        points = [];
+        line = { points: [], color: randomNeonColor(), lineWidth: settings.lineWidth, _phase: Math.random()*Math.PI*2, anchorRiseY: riseOffsetY };
+        lines.push(line);
+        if (settings.demoFullScreen) {
+          const pad = Math.max(0, (settings.demoPad|0)) * DPR;
+          const sx = pad + Math.random() * (canvas.width - pad * 2);
+          const sy = pad + Math.random() * (canvas.height - pad * 2);
+          const world0 = screenToWorldOnPlane(sx, sy, settings.drawPlaneZ * DPR);
+          line.points.push(world0);
+        } else {
+          line.points.push({x:(Math.random()-0.5)*settings.demoStepAmplitude*DPR, y:0, z:(Math.random()-0.5)*settings.demoStepAmplitude*DPR});
+        }
+      }
+
+      function loop(){
+        if (cam.mode==='fly') {
+          const base = fly.speed * DPR * (keys.shift ? fly.sprint : 1);
+          const fwd   = { x: Math.sin(cam.yaw) * Math.cos(cam.pitch), y: -Math.sin(cam.pitch), z: Math.cos(cam.yaw) * Math.cos(cam.pitch) };
+          const right = { x: Math.cos(cam.yaw), y: 0, z: -Math.sin(cam.yaw) };
+          const up    = { x: 0,  y: 1, z: 0 };
+
+          if (keys.w) fly.thrust += fly.thrustGain * DPR;
+          if (keys.s) fly.thrust -= fly.thrustBrake * DPR;
+          if (!keys.w && !keys.s) fly.thrust *= fly.thrustDrag;
+          fly.thrust = Math.max(-10000, Math.min(fly.thrust, fly.thrustMax * DPR));
+
+          let vx = fwd.x * fly.thrust * -0.02;
+          let vy = fwd.y * fly.thrust *  0.02;
+          let vz = fwd.z * fly.thrust *  0.02;
+          if (keys.a) { vx -= right.x*base; vy -= right.y*base; vz += right.z*base; }
+          if (keys.d) { vx += right.x*base; vy += right.y*base; vz -= right.z*base; }
+          if (keys.q) { vx += up.x*base;   vy += up.y*base;   vz += up.z*base; }
+          if (keys.e) { vx -= up.x*base;   vy -= up.y*base;   vz -= up.z*base; }
+          fly.vel.x = fly.vel.x*fly.damping + vx*(1-fly.damping);
+          fly.vel.y = fly.vel.y*fly.damping + vy*(1-fly.damping);
+          fly.vel.z = fly.vel.z*fly.damping + vz*(1-fly.damping);
+          cam.pos.x += fly.vel.x; cam.pos.y += fly.vel.y; cam.pos.z += fly.vel.z;
+          if((painting || settings.demoMode) && !window.__IMPORTING){
+            riseOffsetY += settings.riseSpeed*DPR;
+          }
+        } else {
+          const zoomStep=(settings.zoomStep||40)*DPR;
+          const yStep=(settings.moveYSpeed||60)*DPR;
+          const orbit=(settings.orbitStep||0.02);
+          if (keys.w) cam.radius -= zoomStep;
+          if (keys.s) cam.radius += zoomStep;
+          if (keys.a) cam.velTheta += orbit;
+          if (keys.d) cam.velTheta -= orbit;
+          if (keys.q) cam.y += yStep;
+          if (keys.e) cam.y -= yStep;
+          cam.theta += cam.velTheta; cam.velTheta*=cam.damping;
+          if((painting || settings.demoMode) && !window.__IMPORTING){
+            riseOffsetY += settings.riseSpeed*DPR; cam.y -= settings.riseSpeed*settings.followRatio*DPR;
+          }
+        }
+
+        ctx.setTransform(1,0,0,1,0,0);
+        if(settings.breathingMode){
+          ctx.globalCompositeOperation='destination-out';
+          ctx.globalAlpha=(settings.trailAlpha||0.12);
+          ctx.fillStyle='#000';
+          ctx.fillRect(0,0,canvas.width,canvas.height);
+          ctx.globalCompositeOperation='source-over';
+          ctx.globalAlpha=1;
+        } else {
+          ctx.globalCompositeOperation='source-over';
+          ctx.globalAlpha=1;
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+        }
+
+        drawFloorAndRightWall();
+
+        if (settings.demoMode && !window.__IMPORTING) {
+          if (!line) { startDemoLine(); }
+          else {
+            const last = line.points[line.points.length-1];
+            const amp = settings.demoStepAmplitude * DPR;
+            for (let k = 0; k < Math.max(1, (settings.demoPointsPerFrame|0)); k++) {
+              const nx = last.x + (Math.random() - 0.5) * amp;
+              const ny = last.y + (Math.random() - 0.5) * amp * 0.6;
+              const nz = last.z + (Math.random() - 0.5) * amp;
+              const world = {x:nx,y:ny,z:nz};
+              const dx = world.x - last.x, dy = world.y - last.y, dz = world.z - last.z;
+              if ((dx*dx + dy*dy + dz*dz) > (settings.minSegmentLen * settings.minSegmentLen)) {
+                line.points.push(world);
+              }
+            }
+            if (Math.random() > settings.demoNewLineChance) { line = null; }
+          }
+        }
+
+        for(const L of lines){
+          const translateY = (L===line) ? 0 : (riseOffsetY - (L.anchorRiseY||0));
+          renderLine(L, translateY);
+        }
+
+        requestAnimationFrame(loop);
+      }
+      requestAnimationFrame(loop);
+
+      // ====== Topbar UI ======
+      const wrap=document.createElement('div'); wrap.className='topbar'; document.body.appendChild(wrap);
+      function mkBtn(text){ const b=document.createElement('button'); b.textContent=text; b.className='btn'; wrap.appendChild(b); return b; }
+      function mkChk(text, checked){ const l=document.createElement('label'); l.className='lbl'; l.innerHTML='<input type="checkbox" '+(checked?'checked':'')+'> '+text; wrap.appendChild(l); return l.querySelector('input'); }
+      function mkNum(text, val, step){ const l=document.createElement('label'); l.className='lbl'; l.innerHTML=text+' <input class="num" type="number" step="'+(step||1)+'" value="'+val+'">'; wrap.appendChild(l); return l.querySelector('input'); }
+
+      const btnImp = mkBtn('匯入');
+      const btnExp = mkBtn('匯出');
+      const btnDemo = mkBtn('切換 Demo');
+      const chkClear = mkChk('匯入前清空', true);
+      const chkProgress = mkChk('逐點重繪（注入）', true);
+      const liftInput = mkNum('每檔Y位移', -500, 1);
+      const importWidthInput = mkNum('匯入線寬', (settings.lineWidth||1), 0.1);
+      const lastBatchWidthInput = mkNum('最近批次線寬', (settings.lineWidth||1), 0.1);
+      const applyBatchBtn = mkBtn('套用批次線寬');
+
+      const sep = document.createElement('span'); sep.style.margin='0 6px'; sep.textContent='|'; wrap.appendChild(sep);
+
+      const chkFly = mkChk('自由飛行 FlyCam（禁畫）', false);
+      const speedInput = mkNum('飛行速度', fly.speed, 10);
+
+      const sep2 = document.createElement('span'); sep2.style.margin='0 6px'; sep2.textContent='|'; wrap.appendChild(sep2);
+
+      const chkFloor = mkChk('顯示 floor', true);
+      chkFloor.checked = !!settings.showFloor;
+      chkFloor.addEventListener('change', ()=>{ settings.showFloor = chkFloor.checked; });
+
+      const chkRightWall = mkChk('顯示 rightWall', true);
+      chkRightWall.checked = !!settings.showRightWall;
+      chkRightWall.addEventListener('change', ()=>{ settings.showRightWall = chkRightWall.checked; });
+
+      const fileInput=document.createElement('input'); fileInput.type='file'; fileInput.accept='.json,application/json'; fileInput.multiple=true; fileInput.style.display='none'; document.body.appendChild(fileInput);
+      btnImp.onclick=()=> fileInput.click();
+      btnDemo.onclick=()=> { settings.demoMode = !settings.demoMode; if(settings.demoMode) line=null; };
+      btnExp.onclick = () => {
+        try{
+          const payload = { meta:{ type:'strokesWorld', app:'3D_Sketcher_Merged_Fix6', dpr: window.devicePixelRatio, exportedAt:new Date().toISOString()}, strokesWorld: [] };
+          for (const L of lines) {
+            const pts = Array.isArray(L.points) ? L.points.map(p=>({x:+p.x||0,y:+p.y||0,z:+p.z||0})) : [];
+            if (pts.length >= 2) payload.strokesWorld.push({ points: pts, lineWidth: L.lineWidth });
+          }
+          if (!payload.strokesWorld.length) { alert('目前沒有線條可匯出'); return; }
+          const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'lines_export_' + Date.now() + '.json';
+          document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+        }catch(err){ console.error('[export]', err); alert('匯出失敗：' + err.message); }
+      };
+
+      let __IMPORT_BATCH_COUNTER=0, __LAST_BATCH_ID=null;
+
+      applyBatchBtn.onclick = ()=>{
+        const v=parseFloat(lastBatchWidthInput.value);
+        if(!isFinite(v)) return;
+        const id = (__LAST_BATCH_ID==null? null: __LAST_BATCH_ID);
+        if(id==null) return;
+        for(const L of lines){ if(L.__batchId===id){ L.lineWidth = v; } }
+      };
+
+      chkFly.addEventListener('change', ()=>{
+        if (chkFly.checked){
+          cam.mode = 'fly';
+          const yaw = cam.theta; const pitch = cam.phi;
+          cam.pos.x = 0; cam.pos.y = 0; cam.pos.z = 0;
+          cam.yaw = yaw; cam.pitch = pitch; settings.followRatio = 0;
+        } else {
+          cam.mode = 'orbit';
+        }
+      });
+      speedInput.addEventListener('change', ()=>{ const v = parseFloat(speedInput.value); if (isFinite(v) && v>0) fly.speed = v; });
+
+      // ===== Import (progressive + riseSpeed influence) =====
+      const perPointDelay = 12;
+      fileInput.onchange = async (e) => {
+        const files = Array.from(e.target.files || []);
+        if(!files.length) return;
+        try{
+          if(chkClear.checked){ settings.clearScreen(); }
+          window.__IMPORTING=true;
+          const __BATCH_ID = (++__IMPORT_BATCH_COUNTER); __LAST_BATCH_ID = __BATCH_ID;
+
+          const BASE_LIFT = (+liftInput.value || 0) * DPR;
+          const DRAW_Z = (settings.drawPlaneZ || 1200) * DPR;
+          const risePerPoint = (settings.riseSpeed || 0) * DPR;
+          let importCumY = null;
+
+          function mapStrokePoints(s){
+            const raw = Array.isArray(s.points)? s.points : [];
+            return raw.map(p => ({ x:+p.x||0, y:+p.y||0, z:(p.z!=null? +p.z : DRAW_Z) }));
+          }
+
+          async function injectProgressively(strokes, fileLift){
+            async function appendPointsToLine(lineObj, pts){
+              for(let i=0;i<pts.length;i++){
+                if (importCumY == null){
+                  importCumY = pts[i].y + fileLift;
+                } else {
+                  importCumY -= risePerPoint;
+                }
+                const p = { x: pts[i].x, y: importCumY, z: pts[i].z };
+                lineObj.points.push(p);
+
+                if(chkProgress.checked){
+                  await new Promise(r=>requestAnimationFrame(r));
+                  if(perPointDelay>0) await new Promise(r=>setTimeout(r, perPointDelay));
+                }
+              }
+            }
+            for(const s of strokes){
+              const pts = mapStrokePoints(s);
+              if(pts.length>=2){
+                const __importLW = parseFloat(importWidthInput && importWidthInput.value);
+                const __useLW = isFinite(__importLW) ? __importLW : (settings.lineWidth || 1);
+                const newL = { points: [], color: randomNeonColor(), lineWidth: __useLW, _phase: Math.random()*Math.PI*2, anchorRiseY: riseOffsetY };
+                newL.__batchId = __BATCH_ID;
+                lines.push(newL);
+                await appendPointsToLine(newL, pts);
+              }
+            }
+          }
+
+          let totalStrokes = 0;
+          for(let i=0;i<files.length;i++){
+            const f = files[i];
+            const text = await f.text();
+            const data = JSON.parse(text);
+            const strokes = Array.isArray(data?.strokesWorld)? data.strokesWorld : [];
+            const fileLift = (BASE_LIFT||0) * i;
+            await injectProgressively(strokes, fileLift);
+            totalStrokes += strokes.length;
+          }
+
+          window.__IMPORTING=false;
+          importCumY = null;
+          alert('匯入完成：'+files.length+' 檔（總筆數約 '+totalStrokes+'）');
+        }catch(err){
+          console.error('[import]',err);
+          alert('匯入失敗：'+err.message);
+        } finally {
+          e.target.value='';
+          window.__IMPORTING=false;
+        }
+      };
+
+      // GUI
+      const gui=new dat.GUI();
+      const camUI=gui.addFolder('Camera'); camUI.add(settings, 'orbitStep', 0.0001, 0.02, 0.001).name('左右旋轉速度').listen();
+      camUI.add(settings, 'zoomStep', 5, 200, 5).name('拉近遠速度').listen();
+      camUI.add(settings, 'moveYSpeed', 5, 500, 5).name('上下移動速度').listen();
+      camUI.add(settings, 'moveXSpeed', 5, 200, 5).name('左右平移速度').listen();
+      camUI.add(cam,'radius',400,20000,10).name('鏡頭前後').listen();
+      camUI.add(cam,'theta',-Math.PI,Math.PI,0.01).name('鏡頭左右').listen();
+      camUI.add(cam,'phi',-2,2,0.01).name('鏡頭仰角').listen();
+      camUI.add(cam,'y',-20000,20000,50).name('鏡頭高度').listen();
+
+      const drawUI=gui.addFolder('Draw');
+      drawUI.add(settings,'drawPlaneZ',200,3000,50).name('前方平面距離').listen();
+      drawUI.add(settings,'lineWidth',0.4,3,0.1).name('線寬(細)').listen();
+
+      const look=gui.addFolder('Look');
+      look.add(settings,'breathingMode').name('Breathing 模式').listen();
+      look.add(settings,'trailAlpha',0.02,0.3,0.01).name('殘影Alpha').listen();
+      look.add(settings,'enableGlow').name('啟用微光').listen();
+      look.add(settings,'glowStrength',0,50,1).name('微光強度').listen();
+      look.add(settings,'glowAlpha',0.05,1,0.01).name('微光透明度').listen();
+
+      const misc=gui.addFolder('其他');
+      misc.add({clear:settings.clearScreen},'clear').name('清空');
+      misc.add(settings,'riseSpeed',0,300,1).name('上升速度');
+      misc.add(settings,'followRatio',0,1.2,0.05).name('鏡頭跟隨比例');
+
+      const demoUI = gui.addFolder('Demo');
+      demoUI.add(settings, 'demoMode').name('Demo 模式');
+      demoUI.add(settings, 'demoFullScreen').name('全版起筆');
+      demoUI.add(settings, 'demoPointsPerFrame', 1, 40, 1).name('每幀點數').listen();
+      demoUI.add(settings, 'demoStepAmplitude', 50, 4000, 10).name('步幅(世界)').listen();
+      demoUI.add(settings, 'demoNewLineChance', 0.5, 0.995, 0.005).name('續畫機率').listen();
+      demoUI.add(settings, 'demoPad', 0, 200, 1).name('邊界內縮').listen();
+
+    } catch (err) {
+      const box = document.getElementById('fatal');
+      if (box) { box.style.display='block'; box.textContent = '[Init Error] ' + (err && err.message ? err.message : err); }
+      console.error(err);
+    }
+  });
+  </script>
+
+<!-- Force-remove Aurelia info/overlay/credits even if created later -->
+<script>
+(function(){
+  const kill = (root) => {
+    const selectors = ['#info', '.info', '.overlay', '.credits'];
+    selectors.forEach(sel => {
+      root.querySelectorAll(sel).forEach(el => {
+        try { el.remove(); } catch(_) { try { el.style.display='none'; } catch(__){} }
+      });
+    });
+    // Heuristic: large bottom-left fixed panels with "jellyfish" or "WebGPU"
+    const maybe = root.querySelectorAll('div,section,aside,article');
+    for (const el of maybe) {
+      const s = getComputedStyle(el);
+      if ((s.position === 'fixed' || s.position === 'absolute') && (parseInt(s.bottom||'0') >= 0)) {
+        const txt = (el.textContent || '').toLowerCase();
+        if (txt.includes('jellyfish') || txt.includes('webgpu') || txt.includes('shadertoy')) {
+          try { el.remove(); } catch(_) { el.style.display='none'; }
+        }
+      }
+    }
+  };
+
+  // Initial sweep
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => kill(document));
+  } else {
+    kill(document);
+  }
+
+  // Mutation observer to catch late insertions
+  const mo = new MutationObserver((muts)=>{
+    for (const m of muts) {
+      if (m.type === 'childList') {
+        for (const n of m.addedNodes) {
+          if (n && n.nodeType === 1) {
+            kill(n);
+          }
+        }
+      }
+    }
+  });
+  try { mo.observe(document.documentElement || document.body, {childList:true, subtree:true}); } catch(_){}
+})();
+</script>
+
+
+<!-- Shadow / iframe strengthened remover -->
+<script>
+(function(){
+  const SELECTORS = ['#info', '.info', '.overlay', '.credits'];
+
+  function hideOrRemove(el){
+    try { el.remove(); }
+    catch(_) { try { el.style.display='none'; el.style.visibility='hidden'; el.style.opacity='0'; el.style.pointerEvents='none'; } catch(__){} }
+  }
+
+  function killInRoot(root){
+    if(!root) return;
+    try {
+      SELECTORS.forEach(sel => root.querySelectorAll(sel).forEach(hideOrRemove));
+      // Heuristic sweep
+      const maybe = root.querySelectorAll ? root.querySelectorAll('div,section,aside,article') : [];
+      for (const el of maybe) {
+        try {
+          const s = getComputedStyle(el);
+          if ((s.position === 'fixed' || s.position === 'absolute') && (parseInt(s.bottom || '0') >= 0)) {
+            const txt = (el.textContent || '').toLowerCase();
+            if (txt.includes('jellyfish') || txt.includes('webgpu') || txt.includes('shadertoy')) hideOrRemove(el);
+          }
+        } catch(_){}
+      }
+      // Recurse into open shadow roots
+      if (root.querySelectorAll) {
+        root.querySelectorAll('*').forEach(el=>{
+          try{ if (el.shadowRoot) killInRoot(el.shadowRoot); } catch(_){}
+        });
+      }
+      // Scan iframes (same-origin only)
+      if (root.querySelectorAll) {
+        root.querySelectorAll('iframe').forEach(fr=>{
+          try{
+            const d = fr.contentDocument || fr.contentWindow?.document;
+            if (d) killInRoot(d);
+          } catch(_){ /* cross-origin, ignore */ }
+        });
+      }
+    } catch(_){}
+  }
+
+  // Global observers for document, shadow roots, and iframes
+  const observed = new WeakSet();
+  function observeRoot(root){
+    if (!root || observed.has(root)) return;
+    observed.add(root);
+    try{
+      const mo = new MutationObserver((muts)=>{
+        for (const m of muts) {
+          if (m.type === 'childList') {
+            for (const n of m.addedNodes) {
+              if (n && n.nodeType === 1) {
+                killInRoot(n);
+                // watch new shadow roots
+                try{ if (n.shadowRoot) observeRoot(n.shadowRoot); }catch(_){}
+                // watch new iframes
+                if (n.tagName && n.tagName.toLowerCase() === 'iframe'){
+                  try{
+                    const d = n.contentDocument || n.contentWindow?.document;
+                    if (d) observeRoot(d);
+                  } catch(_){}
+                }
+              }
+            }
+          }
+        }
+      });
+      mo.observe(root, {childList:true, subtree:true});
+    }catch(_){}
+  }
+
+  // Initial sweep and observers
+  function init(){
+    killInRoot(document);
+    observeRoot(document);
+    // Also watch currently present open shadow roots & iframes
+    try{
+      document.querySelectorAll('*').forEach(el=>{ try{ if (el.shadowRoot) observeRoot(el.shadowRoot); }catch(_){} });
+      document.querySelectorAll('iframe').forEach(fr=>{
+        try{
+          const d = fr.contentDocument || fr.contentWindow?.document;
+          if (d) { killInRoot(d); observeRoot(d); }
+        } catch(_){}
+      });
+    }catch(_){}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  // Fallback interval (in case of non-observable renderers)
+  setInterval(()=>{ try{ killInRoot(document); }catch(_){} }, 1000);
+})();
+</script>
+
+
+<!-- Enhanced remover: also targets top-right status panels -->
+<script>
+(function(){
+  const TARGETS = ['#info', '.info', '.overlay', '.credits', '#status', '.status'];
+  function hideOrRemove(el){
+    try{ el.remove(); }
+    catch(_){ try{ el.style.display='none'; el.style.visibility='hidden'; el.style.opacity='0'; el.style.pointerEvents='none'; }catch(__){} }
+  }
+  function killInRoot(root){
+    if(!root) return;
+    try{
+      TARGETS.forEach(sel=>root.querySelectorAll(sel).forEach(hideOrRemove));
+      const maybe = root.querySelectorAll ? root.querySelectorAll('div,section,aside,article') : [];
+      for(const el of maybe){
+        try{
+          const s=getComputedStyle(el);
+          if((s.position==='fixed'||s.position==='absolute')&&(parseInt(s.top||'0')>=0)){
+            const txt=(el.textContent||'').toLowerCase();
+            if(txt.includes('status')||txt.includes('fps')||txt.includes('renderer')) hideOrRemove(el);
+          }
+        }catch(_){}
+      }
+      if(root.querySelectorAll){
+        root.querySelectorAll('*').forEach(el=>{try{if(el.shadowRoot)killInRoot(el.shadowRoot);}catch(_){}});
+        root.querySelectorAll('iframe').forEach(fr=>{try{const d=fr.contentDocument||fr.contentWindow?.document;if(d)killInRoot(d);}catch(_){}});
+      }
+    }catch(_){}
+  }
+  function observeRoot(root){
+    if(!root) return;
+    try{
+      const mo=new MutationObserver((muts)=>{for(const m of muts){if(m.type==='childList'){for(const n of m.addedNodes){if(n&&n.nodeType===1){killInRoot(n);if(n.shadowRoot)observeRoot(n.shadowRoot);if(n.tagName&&n.tagName.toLowerCase()==='iframe'){try{const d=n.contentDocument||n.contentWindow?.document;if(d)observeRoot(d);}catch(_){}}}}}}});
+      mo.observe(root,{childList:true,subtree:true});
+    }catch(_){}
+  }
+  function init(){
+    killInRoot(document);
+    observeRoot(document);
+    try{
+      document.querySelectorAll('*').forEach(el=>{try{if(el.shadowRoot)observeRoot(el.shadowRoot);}catch(_){}});
+      document.querySelectorAll('iframe').forEach(fr=>{try{const d=fr.contentDocument||fr.contentWindow?.document;if(d){killInRoot(d);observeRoot(d);}}catch(_){}});
+    }catch(_){}
+  }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',init);}else{init();}
+  setInterval(()=>{try{killInRoot(document);}catch(_){}} ,1000);
+})();
+</script>
+
+
+<script>
+// ==== Sync right-drag to Aurelia background (camera rotation like original) ====
+(function(){
+  let overlay = document.getElementById('canvas');
+  let bgCanvas = null;
+  function findBgCanvas(){
+    const canvases = Array.from(document.querySelectorAll('canvas'));
+    // pick the first canvas that is not our overlay (id="canvas")
+    for(const c of canvases){
+      if (c !== overlay) return c;
+    }
+    return null;
+  }
+  function ensureBg(){
+    if (!bgCanvas || !document.body.contains(bgCanvas)) {
+      bgCanvas = findBgCanvas();
+    }
+  }
+
+  // synthesize pointer events on bg canvas
+  function synth(type, clientX, clientY, button){
+    if (!bgCanvas) return;
+    const rect = bgCanvas.getBoundingClientRect();
+    const x = Math.max(rect.left, Math.min(clientX, rect.right-1));
+    const y = Math.max(rect.top,  Math.min(clientY, rect.bottom-1));
+    const evt = new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      pointerType: 'mouse',
+      isPrimary: true,
+      clientX: x,
+      clientY: y,
+      button: (typeof button==='number'? button : 2), // right button
+      buttons: (type==='pointerup'? 0 : 2)
+    });
+    bgCanvas.dispatchEvent(evt);
+  }
+
+  let forwarding = false;
+  let lastX = 0, lastY = 0;
+
+  function onDown(e){
+    if (e.button !== 2) return;
+    ensureBg();
+    if (!bgCanvas) return;
+    forwarding = true;
+    lastX = e.clientX; lastY = e.clientY;
+    synth('pointerdown', e.clientX, e.clientY, 2);
+  }
+  function onMove(e){
+    if (!forwarding) return;
+    ensureBg();
+    if (!bgCanvas) return;
+    // forward movement while right button held
+    synth('pointermove', e.clientX, e.clientY, 2);
+  }
+  function onUp(e){
+    if (e.button !== 2) return;
+    if (!forwarding) return;
+    ensureBg();
+    if (!bgCanvas) { forwarding=false; return; }
+    synth('pointerup', e.clientX, e.clientY, 2);
+    forwarding = false;
+  }
+  function onLeave(e){
+    if (!forwarding) return;
+    ensureBg();
+    if (!bgCanvas) { forwarding=false; return; }
+    synth('pointerup', lastX, lastY, 2);
+    forwarding = false;
+  }
+
+  overlay.addEventListener('mousedown', onDown, true);
+  window.addEventListener('mousemove', onMove, true);
+  window.addEventListener('mouseup', onUp, true);
+  overlay.addEventListener('mouseleave', onLeave, true);
+
+  // also react if Aurelia canvas appears late
+  const mo = new MutationObserver(()=>ensureBg());
+  mo.observe(document.documentElement, {childList:true, subtree:true});
+  ensureBg();
+})();
+</script>
+
 </body>
 </html>
-
